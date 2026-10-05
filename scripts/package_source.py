@@ -40,7 +40,9 @@ def main() -> int:
     destination = build_root / "发行"
     destination.mkdir(parents=True, exist_ok=True)
     archive = destination / f"LandlockFilesystemGate-{version}.tar.gz"
-    archive.write_bytes(gzip.compress(raw, compresslevel=9, mtime=0))
+    compressed = bytearray(gzip.compress(raw, compresslevel=9, mtime=0))
+    compressed[9] = 255  # RFC 1952 unknown OS, independent of host zlib/Python.
+    archive.write_bytes(compressed)
     receipt = {
         "version": version,
         "commit": commit,
