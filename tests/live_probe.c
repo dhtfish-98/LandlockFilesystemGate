@@ -34,7 +34,7 @@ static int can_append(const char *path) {
 
 static int denied_open(const char *path, int flags) {
     errno = 0;
-    int fd = open(path, flags);
+    int fd = open(path, flags, 0600);
     if (fd >= 0) {
         close(fd);
         return 0;
