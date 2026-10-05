@@ -100,6 +100,10 @@ def main() -> int:
     path = case / "receipt.json"
     path.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n")
     print(f"{receipt['status']} {path}")
+    if receipt["status"] != "PASS":
+        print(path.read_text())
+        if output.exists():
+            print(output.read_text())
     return 0 if receipt["status"] == "PASS" else 1
 
 
