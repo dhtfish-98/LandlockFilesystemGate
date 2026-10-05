@@ -1,0 +1,11 @@
+# Design and threat boundary
+
+The caller supplies an owned process and a trusted, preselected allowed directory. The gate queries the live kernel's Landlock ABI, creates a ruleset handling `READ_FILE`, `READ_DIR`, `WRITE_FILE`, `MAKE_REG` and `TRUNCATE`, adds one `PATH_BENEATH` rule for that directory, sets `no_new_privs`, and restricts the calling thread. A second exact-file rule may grant `READ_FILE` to a trusted executable so a child can re-execute it. The ruleset is irreversible and inherited by newly created children. The caller must abort if `lfg_apply_readwrite` returns an error and must apply it before creating other threads.
+
+The code requires Landlock ABI **3 or newer**. ABI 1 and 2 cannot deny file truncation, so this project reports an unsupported environment (`OPEN`) and does not claim a partial write boundary. `abi_out` reports an available lower ABI even on this fail-closed path. The project does not silently downgrade protection.
+
+The lab compares the same fixture paths and owned process before and after applying the rule. The weak baseline performs read and write-open without a Landlock ruleset. The guarded path checks allowed reads, writes, creates and truncation, denied operations outside the allowed directory, and a re-executed child that inherits denial. Before/after SHA-256 of the outside fixture and absence of an outside newly created file guard against a false positive from a test that merely reports an error.
+
+This is intentionally narrow. It does **not** restrict already-open file descriptors, sibling threads that existed before policy application, networking, device ioctl, file metadata inspection, removal, directory creation, links, moves, or every executable loading path. The caller must validate and protect the chosen directory and optional executable path; those inputs are trusted configuration, not user-supplied path authorization. The API is not a replacement for process ownership, authentication, filesystem permissions or a complete container sandbox. It does not evaluate or claim a vulnerability in `rust-landlock`.
+
+The [Linux Landlock documentation](https://docs.kernel.org/6.17/userspace-api/landlock.html) describes per-thread inheritance, preopened file descriptors and the ABI 3 truncation right. The experiment uses only self-owned temporary files and a disposable VM.
