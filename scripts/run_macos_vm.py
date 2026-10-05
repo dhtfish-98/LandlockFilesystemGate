@@ -17,11 +17,16 @@ import platform
 import pty
 import re
 import select
+import shlex
 import shutil
 import subprocess
 import sys
 import tarfile
 import time
+
+# Keep imported-helper bytecode out of the source checkout.
+sys.dont_write_bytecode = True
+from elf_check import require_static_elf
 
 
 ALPINE = "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/aarch64/netboot"
@@ -130,16 +135,20 @@ def verify_log(log: str, returncode: int) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--build-root", type=Path, required=True)
+    parser.add_argument("--run-id")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     build_root = args.build_root.resolve()
     if "Build" not in build_root.parts:
         parser.error("build root must be inside Build")
     env_dir = build_root / "环境/LandlockFilesystemGate-20261006"
-    verify_dir = build_root / "验证/LandlockFilesystemGate-20261006"
+    run_id = args.run_id or f"run-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{os.getpid()}"
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", run_id) is None:
+        parser.error("run-id must be a short path-safe name")
+    verify_dir = build_root / "验证/LandlockFilesystemGate-20261006" / run_id
     env_dir.mkdir(parents=True, exist_ok=True)
-    verify_dir.mkdir(parents=True, exist_ok=True)
-    receipt: dict = {"status": "OPEN", "created_utc": datetime.now(timezone.utc).isoformat(), "source_root": str(root), "build_root": str(build_root), "platform": platform.platform()}
+    verify_dir.mkdir(parents=True, exist_ok=False)
+    receipt: dict = {"status": "OPEN", "created_utc": datetime.now(timezone.utc).isoformat(), "run_id": run_id, "source_root": str(root), "build_root": str(build_root), "platform": platform.platform()}
     log = verify_dir / "vm-serial.log"
     try:
         if sys.platform != "darwin" or platform.machine() != "arm64":
@@ -169,9 +178,21 @@ def main() -> int:
         if not zig.exists():
             with tarfile.open(zig_archive) as archive:
                 archive.extractall(env_dir, filter="data")
-        guest_probe = verify_dir / "landlock-live"
         zig_env = dict(os.environ, ZIG_GLOBAL_CACHE_DIR=str(env_dir / "zig-cache-global"), ZIG_LOCAL_CACHE_DIR=str(env_dir / "zig-cache-local"))
-        subprocess.run([str(zig), "cc", "-target", "aarch64-linux-musl", "-static", "-O2", "-Wall", "-Wextra", "-Werror", "-I", str(root / "include"), str(root / "src/landlock_filesystem_gate.c"), str(root / "tests/live_probe.c"), "-o", str(guest_probe)], check=True, env=zig_env)
+        compiler = verify_dir / "zig-cc"
+        compiler.write_text(f"#!/bin/sh\nexec {shlex.quote(str(zig))} cc -target aarch64-linux-musl \"$@\"\n")
+        compiler.chmod(0o755)
+        archiver = verify_dir / "zig-ar"
+        archiver.write_text(f"#!/bin/sh\nexec {shlex.quote(str(zig))} ar \"$@\"\n")
+        archiver.chmod(0o755)
+        ranlib = verify_dir / "zig-ranlib"
+        ranlib.write_text(f"#!/bin/sh\nexec {shlex.quote(str(zig))} ranlib \"$@\"\n")
+        ranlib.chmod(0o755)
+        cmake_build = verify_dir / "cmake-linux"
+        subprocess.run(["cmake", "-S", str(root), "-B", str(cmake_build), "-DCMAKE_SYSTEM_NAME=Linux", f"-DCMAKE_C_COMPILER={compiler}", f"-DCMAKE_AR={archiver}", f"-DCMAKE_RANLIB={ranlib}", "-DCMAKE_BUILD_TYPE=Release"], check=True, env=zig_env)
+        subprocess.run(["cmake", "--build", str(cmake_build), "--parallel", "2"], check=True, env=zig_env)
+        guest_probe = cmake_build / "landlock-live"
+        receipt["binary_elf"] = require_static_elf(guest_probe)
         overlay = verify_dir / "overlay-final"
         if overlay.exists():
             shutil.rmtree(overlay)

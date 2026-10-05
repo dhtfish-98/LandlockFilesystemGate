@@ -10,6 +10,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_executable(landlock-live tests/live_probe.c)
   target_link_libraries(landlock-live PRIVATE landlock_filesystem_gate)
   target_compile_options(landlock-live PRIVATE -Wall -Wextra -Werror)
+  # The probe re-executes after READ_FILE is restricted to its test paths.
+  # A dynamic loader would need to reopen libc outside those paths.
+  target_link_options(landlock-live PRIVATE -static)
 endif()
 
 install(TARGETS landlock_filesystem_gate ARCHIVE DESTINATION lib)

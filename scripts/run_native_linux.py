@@ -16,6 +16,10 @@ import re
 import subprocess
 import sys
 
+# Keep imported-helper bytecode out of the source checkout.
+sys.dont_write_bytecode = True
+from elf_check import require_static_elf
+
 
 EXPECTED = (
     "BASE_DENY_READ=PASS",
@@ -57,6 +61,7 @@ def main() -> int:
         subprocess.run(["cmake", "-S", str(project), "-B", str(compiled), "-DCMAKE_BUILD_TYPE=Release"], check=True)
         subprocess.run(["cmake", "--build", str(compiled), "--parallel", "2"], check=True)
         binary = compiled / "landlock-live"
+        receipt["binary_elf"] = require_static_elf(binary)
         allowed = case / "fixture/allow"
         denied = case / "fixture/deny"
         allowed.mkdir(parents=True, exist_ok=True)
